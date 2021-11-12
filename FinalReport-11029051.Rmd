@@ -1,0 +1,210 @@
+---
+title: "INFO 3010 - Final Report"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Fall 2019 by Lingzi Hong
+## Time: Friday, Dec 13, 2019
+### Instructions
+
+
+### library
+
+```{r}
+
+library(dplyr)
+library(ggplot2)
+
+```
+### Read the file 'abnbnyc.csv' to a dataframe. Check the first 5 lines of the data. 
+```{r}
+setwd('/Users/ThiPhan1/Documents/UNT/1FALL2019/INFO3010/FINAL')
+abnb <- read.csv("abnbync.csv")
+str(abnb)
+head(abnb, 5)
+```
+
+### Find the missing value and then drop missing value if it has
+```{r}
+
+#missing <- colSums(is.na(abnb))
+#abnb <- na.omit(abnb)
+
+```
+
+### Find the lowest, the highest and median of the price 
+```{r}
+
+summary(abnb$price)
+
+```
+
+### Find how many neighborhood groups in the dataset
+```{r}
+unique(abnb$neighbourhood_group)
+```
+
+### Map of neighborhood group
+```{r}
+
+ggplot(abnb, aes(x = longitude, y = latitude, color = neighbourhood_group)) + geom_point()
+
+```
+
+### Distribution of price for each group 
+```{r}
+
+abnb_group <- abnb %>%
+  group_by(neighbourhood_group) %>%
+  summarize(price = mean(price))
+
+abnb_group
+
+ggplot(abnb, aes(price)) +
+  geom_histogram(bins = 30, aes(y = ..density..), fill = "yellow") + 
+  geom_density(alpha = 0.2, fill = "yellow") +
+  geom_vline(data = abnb_group, aes(xintercept = price), size = 2, linetype = 3) +
+  geom_text(data = abnb_group,y = 1.5, aes(x = price + 1400, label = paste("Mean  = ",price)), color = "darkgreen", size = 4) +
+  facet_wrap(~neighbourhood_group) +
+  scale_x_log10() 
+```
+
+### Distribution of price for each room type
+```{r}
+
+ggplot(abnb, aes(x = room_type, y=price, color = room_type)) + geom_bar(stat = "identity")
+```
+
+### The list of top 10 popular places that were rented mostly
+```{r}
+
+popularplace <- abnb %>% group_by(neighbourhood, name) %>% summarise(count = n_distinct(id)) %>% arrange(desc(count))
+head(popularplace,10)
+
+```
+
+### Model - Data splitting
+```{r}
+
+# Divide as training and testing: 20% test 80% train
+# get the training data size
+sample_size <- floor(0.8*nrow(abnb))
+
+# check the training data size
+#sample_size
+
+# get the index of training samples
+train_ind <- sample(seq_len(nrow(abnb)), size = sample_size)
+#train_ind
+
+# generate the train and test dataset
+train <- abnb[train_ind,]
+test <- abnb[-train_ind,]
+
+```
+### Linear Regression Model
+```{r}
+
+linearmodel <- lm(price ~ latitude + longitude + room_type + minimum_nights  + availability_365 + neighbourhood_group, data = train)
+
+# check the model
+summary(linearmodel)
+
+# optional diagnosis graphs
+layout(matrix(c(1,2,3,4),2,2))  
+plot(linearmodel)
+
+# evaluate the model on test data
+prediction <-predict(linearmodel, newdata = test)
+
+# check head of the prediction
+summary(prediction)
+
+
+```
+### The second Linear Model
+```{r}
+
+library('hydroGOF') 
+rmse(prediction, test$price, na.rm = TRUE)
+
+# test the correlation between predicted values and real values
+cor.test(prediction,test$price,use= "complete")
+
+# train linear models with regularization
+# before training, remove samples with NA 
+train <- train[complete.cases(train),]
+#train
+
+#set cross validation method: ## 5-fold CV, repeated two times 
+library('caret')
+fitControl <- trainControl(method = "repeatedcv", 
+                           number = 5,
+                           repeats = 2)
+#fitControl
+
+#train the model
+glmFit1 <- train(price ~ latitude + longitude + room_type + minimum_nights  + availability_365 + neighbourhood_group, 
+                data = train, method = "penalized", 
+                trControl= fitControl)
+
+# check the model
+glmFit1
+layout(matrix(c(1,2,3,4),2,2))  
+plot(glmFit1)
+
+# apply model on test data
+test <-test[complete.cases(test),]
+prediction<-predict(glmFit1,newdata = test)
+
+# evaluate prediction on test data
+rmse(prediction, test$price)
+cor.test(prediction, test$price)
+
+```
+### SV Model
+```{r}
+
+#set cross validation method:
+## 5-fold CV ,repeated two times
+
+fitControl <- trainControl(
+                            method = "repeatedcv",
+                            number = 5,
+                            repeats = 2)
+
+#train the model Support Vector Machines with Polynomial Kernel
+svmpoly <- train(price ~ latitude + longitude + room_type + minimum_nights  + availability_365 + neighbourhood_group,
+                 data = train,
+                 method = "svmPoly",
+                 trControl = fitControl)
+
+# check the model svmPoly
+svmpoly
+
+# apply model on test data
+prediction_svmpoly <- predict(svmpoly, newdata = test)
+
+# evaluate prediction results
+confusionMatrix(prediction_svmpoly, test$price)
+
+# try to build svm models wit hother kernels, evaluate the results on test dataset to see if the performance increases or decreases
+# svm with linear kernel 
+svmlinear <- train(price ~ latitude + longitude + room_type + minimum_nights  + availability_365 + neighbourhood_group,
+                   data = train, 
+                    method = "svmLinear", 
+                    trControl = fitControl)
+svmlinear
+
+# svm with gaussian kernel
+svmradial <- train(price ~ latitude + longitude + room_type + minimum_nights  + availability_365 + neighbourhood_group, 
+                    data = train, 
+                    method = "svmRadial", 
+                    trControl= fitControl)
+svmradial
+
+```
